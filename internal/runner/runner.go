@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"factorio-mod-qa/internal/factorio"
+	"factorio-mod-qa/internal/qa"
 	"factorio-mod-qa/internal/rcon"
 	"factorio-mod-qa/internal/reports"
 	"factorio-mod-qa/internal/snapshot"
@@ -36,6 +37,7 @@ type RunOptions struct {
 	RCONPassword   string
 	Timeout        time.Duration
 	Policy         snapshot.Policy
+	QAScenario     string
 }
 
 type DoctorOptions struct {
@@ -91,13 +93,22 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if err != nil {
 		return err
 	}
-	defer proc.Stop()
+	defer func() {
+		if proc != nil {
+			_ = proc.Stop()
+		}
+	}()
 
 	client, err := WaitForRCON(ctx, proc.RCON, opts.RCONPassword, opts.Timeout)
 	if err != nil {
 		return fmt.Errorf("factorio started but RCON did not become ready; log: %s: %w", proc.LogPath, err)
 	}
-	defer client.Close()
+	initialLogPath := proc.LogPath
+	defer func() {
+		if client != nil {
+			_ = client.Close()
+		}
+	}()
 
 	raw, err := client.Command(ExportCommand)
 	if err != nil {
@@ -117,30 +128,110 @@ func Run(ctx context.Context, opts RunOptions) error {
 		return err
 	}
 	reportIssues := append([]snapshot.Issue{}, analysis.ReportableIssues...)
-	runtimeIssues, err := detectScriptEventGrowth(client, snap)
-	if err != nil {
-		runtimeIssue := snapshot.Issue{
-			Code:     "runtime_probe_failed",
-			Severity: "warning",
-			Title:    "Runtime script-stress probe failed",
-			Details:  map[string]any{"error": err.Error()},
-		}
-		reportIssues = append(reportIssues, runtimeIssue)
-	} else {
-		reportIssues = append(reportIssues, runtimeIssues...)
+
+	session := &qa.Session{
+		RCON:      client,
+		Process:   proc,
+		Snapshot:  snap,
+		RunID:     opts.RunID,
+		Artifacts: map[string]string{},
 	}
+	session.RestartFromSave = func(restartCtx context.Context, saveName string) error {
+		if client != nil {
+			_ = client.Close()
+			client = nil
+		}
+		currentProc := proc
+		if currentProc == nil {
+			return errors.New("factorio process is not running")
+		}
+		if err := currentProc.Stop(); err != nil {
+			return err
+		}
+		proc = nil
+
+		port, err := rconPort(currentProc.RCON)
+		if err != nil {
+			return err
+		}
+		savePath := filepath.Join(currentProc.Dirs.Saves, saveName+".zip")
+		restartProc, err := factorio.Start(restartCtx, factorio.StartOptions{
+			FactorioBin:    opts.FactorioBin,
+			WriteDir:       opts.WriteDir,
+			ModsPath:       opts.ModsPath,
+			ControlModPath: opts.ControlModPath,
+			RunID:          opts.RunID,
+			RCONPort:       port,
+			RCONPassword:   opts.RCONPassword,
+			SavePath:       savePath,
+			LogName:        "factorio-reload-" + sanitizeRunID(saveName) + ".log",
+		})
+		if err != nil {
+			return err
+		}
+		restartClient, err := WaitForRCON(restartCtx, restartProc.RCON, opts.RCONPassword, opts.Timeout)
+		if err != nil {
+			_ = restartProc.Stop()
+			return fmt.Errorf("factorio restarted but RCON did not become ready; log: %s: %w", restartProc.LogPath, err)
+		}
+		proc = restartProc
+		client = restartClient
+		session.Process = restartProc
+		session.RCON = restartClient
+		session.Artifacts["factorio_log_reload_"+sanitizeArtifactKey(saveName)] = restartProc.LogPath
+		return nil
+	}
+	scenarios, err := qa.SelectScenarios(opts.QAScenario, snap)
+	if err != nil {
+		return err
+	}
+	scenarioRuns, err := qa.Runner{Scenarios: scenarios, TraceDir: proc.Dirs.Run}.Run(ctx, session)
+	if err != nil {
+		return err
+	}
+	artifacts := map[string]string{
+		"factorio_log":       initialLogPath,
+		"prototype_snapshot": snapshotPath,
+	}
+	for key, value := range session.Artifacts {
+		artifacts[key] = value
+	}
+	scenarioSummaries := make([]reports.ScenarioSummary, 0, len(scenarioRuns))
+	for _, scenarioRun := range scenarioRuns {
+		reportIssues = append(reportIssues, scenarioRun.Issues...)
+		artifactKey := "trace_" + sanitizeArtifactKey(scenarioRun.Name)
+		artifacts[artifactKey] = scenarioRun.TracePath
+		scenarioSummaries = append(scenarioSummaries, reports.ScenarioSummary{
+			Name:       scenarioRun.Name,
+			IssueCount: scenarioRun.IssueCount,
+			TracePath:  scenarioRun.TracePath,
+			Error:      scenarioRun.Error,
+			DurationMS: scenarioRun.DurationMS,
+		})
+	}
+
+	saveName := "fmqa-" + sanitizeRunID(opts.RunID)
+	var saveResult struct {
+		Save string `json:"save"`
+	}
+	if err := session.Dispatch("save", map[string]any{"name": saveName}, &saveResult); err != nil {
+		return fmt.Errorf("snapshot, reports, and traces were prepared, but native save failed: %w", err)
+	}
+	if saveResult.Save == "" {
+		saveResult.Save = saveName
+	}
+	artifacts["native_save"] = filepath.Join(proc.Dirs.Saves, saveResult.Save+".zip")
+
 	summary := reports.Summary{
 		RunID:        opts.RunID,
 		SnapshotPath: snapshotPath,
 		IssueCount:   len(reportIssues),
 		Issues:       reportIssues,
-		Artifacts:    map[string]string{"factorio_log": proc.LogPath},
+		Artifacts:    artifacts,
+		Scenarios:    scenarioSummaries,
 	}
 	if err := reports.Write(proc.Dirs.Reports, summary); err != nil {
 		return err
-	}
-	if _, err := client.Command(`/silent-command remote.call("qa_control_mod", "save", "fmqa-` + sanitizeRunID(opts.RunID) + `")`); err != nil {
-		return fmt.Errorf("snapshot and reports were written, but native save failed: %w", err)
 	}
 	return nil
 }
@@ -205,62 +296,6 @@ func ValidateSnapshot(path string, reportDir string, policy snapshot.Policy) err
 	return encoder.Encode(analysis.Issues)
 }
 
-func detectScriptEventGrowth(client *rcon.Client, snap *snapshot.Snapshot) ([]snapshot.Issue, error) {
-	if _, ok := snap.Entities["qa-ticking-machine"]; !ok {
-		return nil, nil
-	}
-	if _, err := client.Command(`/silent-command remote.call("qa_control_mod", "reset_script_event_counts")`); err != nil {
-		return nil, err
-	}
-	payload := map[string]any{
-		"surface":  "nauvis",
-		"entities": scriptStressEntities("qa-ticking-machine", 12),
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := client.Command(`/silent-command rcon.print(remote.call("qa_control_mod", "place_entities_batch", ` + luaString(string(data)) + `))`); err != nil {
-		return nil, err
-	}
-	time.Sleep(5 * time.Second)
-	raw, err := client.Command(`/silent-command rcon.print(remote.call("qa_control_mod", "script_event_counts"))`)
-	if err != nil {
-		return nil, err
-	}
-	counts := map[string]float64{}
-	if err := json.Unmarshal([]byte(extractJSONObject(raw)), &counts); err != nil {
-		return nil, err
-	}
-	var issues []snapshot.Issue
-	for name, count := range counts {
-		if count >= 100 {
-			issues = append(issues, snapshot.Issue{
-				Code:     "script_event_growth",
-				Severity: "warning",
-				Title:    fmt.Sprintf("Script event counter %s grew during stress probe", name),
-				Details:  map[string]any{"counter": name, "count": count, "entity": "qa-ticking-machine"},
-			})
-		}
-	}
-	return issues, nil
-}
-
-func scriptStressEntities(name string, count int) []map[string]any {
-	entities := make([]map[string]any, 0, count)
-	for i := 0; i < count; i++ {
-		entities = append(entities, map[string]any{
-			"name": name,
-			"position": map[string]float64{
-				"x": float64(i % 4),
-				"y": float64(i / 4),
-			},
-			"force": "player",
-		})
-	}
-	return entities
-}
-
 func WaitForRCON(ctx context.Context, address string, password string, timeout time.Duration) (*rcon.Client, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
@@ -280,6 +315,18 @@ func WaitForRCON(ctx context.Context, address string, password string, timeout t
 		lastErr = errors.New("timed out")
 	}
 	return nil, lastErr
+}
+
+func rconPort(address string) (int, error) {
+	i := strings.LastIndex(address, ":")
+	if i < 0 || i == len(address)-1 {
+		return 0, fmt.Errorf("RCON address %q did not include a port", address)
+	}
+	port, err := strconv.Atoi(address[i+1:])
+	if err != nil {
+		return 0, fmt.Errorf("RCON address %q had invalid port: %w", address, err)
+	}
+	return port, nil
 }
 
 func decodeSnapshotResponse(raw string) (*snapshot.Snapshot, error) {
@@ -325,4 +372,8 @@ func sanitizeRunID(value string) string {
 		return "run"
 	}
 	return b.String()
+}
+
+func sanitizeArtifactKey(value string) string {
+	return strings.ReplaceAll(sanitizeRunID(value), "-", "_")
 }

@@ -292,11 +292,156 @@ local function runtime_summary()
     })
 end
 
+local function ensure_storage()
+    storage.fmqa_entities = storage.fmqa_entities or {}
+    storage.fmqa_event_counts = storage.fmqa_event_counts or {}
+end
+
+local function find_tracked_entity(unit_number)
+    ensure_storage()
+    local unit = tonumber(unit_number)
+    if not unit then return nil end
+    local entity = storage.fmqa_entities[unit]
+    if entity and entity.valid then return entity end
+    for _, surface in pairs(game.surfaces or {}) do
+        for _, candidate in pairs(surface.find_entities_filtered({})) do
+            if candidate.unit_number == unit then
+                storage.fmqa_entities[unit] = candidate
+                return candidate
+            end
+        end
+    end
+    return nil
+end
+
+local function inventory_counts(inventory)
+    local counts = {}
+    if not inventory or not inventory.valid then return counts end
+    local contents = inventory.get_contents()
+    for name, count in pairs(contents or {}) do
+        if type(count) == "table" and count.name then
+            counts[count.name] = (counts[count.name] or 0) + (count.count or 0)
+        else
+            counts[name] = (counts[name] or 0) + count
+        end
+    end
+    return counts
+end
+
+local function first_entity_inventory(entity)
+    local candidates = {
+        defines.inventory.chest,
+        defines.inventory.cargo_wagon,
+        defines.inventory.car_trunk,
+        defines.inventory.assembling_machine_input,
+        defines.inventory.assembling_machine_output,
+        defines.inventory.furnace_source,
+        defines.inventory.furnace_result,
+        defines.inventory.rocket_silo_input,
+        defines.inventory.rocket_silo_output
+    }
+    for _, inventory_id in pairs(candidates) do
+        local ok, inventory = pcall(function() return entity.get_inventory(inventory_id) end)
+        if ok and inventory and inventory.valid then
+            return inventory, inventory_id
+        end
+    end
+    return nil, nil
+end
+
+local function snapshot_state(payload)
+    local surface = game.surfaces[payload.surface or "nauvis"]
+    if not surface then error("unknown surface: " .. tostring(payload.surface)) end
+    local entity_counts = {}
+    for _, entity in pairs(surface.find_entities_filtered({area = payload.area})) do
+        entity_counts[entity.name] = (entity_counts[entity.name] or 0) + 1
+    end
+    local ground_items = {}
+    for _, item_entity in pairs(surface.find_entities_filtered({type = "item-entity", area = payload.area})) do
+        if item_entity.stack and item_entity.stack.valid_for_read then
+            local name = item_entity.stack.name
+            ground_items[name] = (ground_items[name] or 0) + item_entity.stack.count
+        end
+    end
+    return {
+        tick = game.tick,
+        surface = surface.name,
+        entity_counts = entity_counts,
+        ground_items = ground_items
+    }
+end
+
+local function place_entity(payload)
+    ensure_storage()
+    local surface = game.surfaces[payload.surface or "nauvis"]
+    if not surface then error("unknown surface: " .. tostring(payload.surface)) end
+    local entity = surface.create_entity({
+        name = payload.name,
+        position = payload.position or {0, 0},
+        force = payload.force or "player",
+        direction = payload.direction,
+        raise_built = false
+    })
+    if not entity then error("failed to create entity: " .. tostring(payload.name)) end
+    if entity.unit_number then
+        storage.fmqa_entities[entity.unit_number] = entity
+    end
+    return {name = entity.name, unit_number = entity.unit_number, position = entity.position}
+end
+
+local function insert_items(payload)
+    local entity = find_tracked_entity(payload.unit_number)
+    if not entity then error("unknown entity unit_number: " .. tostring(payload.unit_number)) end
+    local inventory = first_entity_inventory(entity)
+    if not inventory then error("entity has no supported inventory: " .. entity.name) end
+    local inserted = {}
+    for name, count in pairs(payload.items or {}) do
+        inserted[name] = inventory.insert({name = name, count = count})
+    end
+    return {unit_number = entity.unit_number, inserted = inserted, inventory = inventory_counts(inventory)}
+end
+
+local function read_entity_inventory(payload)
+    local entity = find_tracked_entity(payload.unit_number)
+    if not entity then error("unknown entity unit_number: " .. tostring(payload.unit_number)) end
+    local inventory = first_entity_inventory(entity)
+    return {
+        unit_number = entity.unit_number,
+        name = entity.name,
+        inventory = inventory_counts(inventory)
+    }
+end
+
+local function mine_entity_to_inventory(payload)
+    local entity = find_tracked_entity(payload.unit_number)
+    if not entity then error("unknown entity unit_number: " .. tostring(payload.unit_number)) end
+    local buffer = game.create_inventory(payload.buffer_size or 100)
+    local mined = entity.mine({
+        inventory = buffer,
+        force = payload.force_mine == true,
+        raise_destroyed = false,
+        ignore_minable = false
+    })
+    local counts = inventory_counts(buffer)
+    buffer.destroy()
+    return {mined = mined, inventory = counts}
+end
+
+local function remove_entity(payload)
+    local entity = find_tracked_entity(payload.unit_number)
+    if not entity then return {removed = false} end
+    local unit = entity.unit_number
+    entity.destroy({raise_destroy = false})
+    if unit then storage.fmqa_entities[unit] = nil end
+    return {removed = true, unit_number = unit}
+end
+
 local function place_entities_batch(json_payload)
     local payload = decode_json(json_payload)
     local surface = game.surfaces[payload.surface or "nauvis"]
     if not surface then error("unknown surface: " .. tostring(payload.surface)) end
     local placed = {}
+    ensure_storage()
     for _, spec in pairs(payload.entities or {}) do
         local entity = surface.create_entity({
             name = spec.name,
@@ -305,6 +450,9 @@ local function place_entities_batch(json_payload)
             direction = spec.direction
         })
         if entity then
+            if entity.unit_number then
+                storage.fmqa_entities[entity.unit_number] = entity
+            end
             table.insert(placed, {name = entity.name, unit_number = entity.unit_number, position = entity.position})
         end
     end
@@ -320,7 +468,7 @@ local function advance_ticks(ticks)
 end
 
 local function script_event_counts()
-    storage.fmqa_event_counts = storage.fmqa_event_counts or {}
+    ensure_storage()
     local counts = {}
     for key, value in pairs(storage.fmqa_event_counts) do
         counts[key] = value
@@ -339,6 +487,7 @@ local function script_event_counts()
 end
 
 local function reset_script_event_counts()
+    ensure_storage()
     storage.fmqa_event_counts = {}
     if remote.interfaces["mod_qa_agent"] and remote.interfaces["mod_qa_agent"]["reset_script_event_counts"] then
         pcall(function()
@@ -354,6 +503,68 @@ local function save(name)
     return encode_json({save = save_name})
 end
 
+local function dispatch(command, json_payload)
+    local handlers = {
+        runtime_summary = function(payload)
+            return decode_json(runtime_summary())
+        end,
+        snapshot_state = function(payload)
+            return snapshot_state(payload or {})
+        end,
+        place_entity = function(payload)
+            return place_entity(payload or {})
+        end,
+        place_entities_batch = function(payload)
+            return decode_json(place_entities_batch(encode_json(payload or {})))
+        end,
+        insert_items = function(payload)
+            return insert_items(payload or {})
+        end,
+        read_entity_inventory = function(payload)
+            return read_entity_inventory(payload or {})
+        end,
+        mine_entity_to_inventory = function(payload)
+            return mine_entity_to_inventory(payload or {})
+        end,
+        remove_entity = function(payload)
+            return remove_entity(payload or {})
+        end,
+        advance_ticks = function(payload)
+            return decode_json(advance_ticks(payload and payload.ticks or 0))
+        end,
+        script_event_counts = function(payload)
+            return decode_json(script_event_counts())
+        end,
+        reset_script_event_counts = function(payload)
+            return decode_json(reset_script_event_counts())
+        end,
+        save = function(payload)
+            return decode_json(save(payload and payload.name or nil))
+        end
+    }
+
+    local handler = handlers[command]
+    if not handler then
+        return encode_json({ok = false, error = "unknown qa_control_mod command: " .. tostring(command)})
+    end
+
+    local ok_payload, payload = pcall(function()
+        if not json_payload or json_payload == "" then return {} end
+        return decode_json(json_payload)
+    end)
+    if not ok_payload then
+        return encode_json({ok = false, error = "invalid JSON payload: " .. tostring(payload)})
+    end
+
+    local ok, result = pcall(function()
+        return handler(payload or {})
+    end)
+    if not ok then
+        return encode_json({ok = false, error = tostring(result)})
+    end
+    return encode_json({ok = true, result = result or {}})
+end
+
 remote.add_interface("qa_control_mod", {
     export_snapshot = export_snapshot,
     runtime_summary = runtime_summary,
@@ -361,5 +572,6 @@ remote.add_interface("qa_control_mod", {
     advance_ticks = advance_ticks,
     script_event_counts = script_event_counts,
     reset_script_event_counts = reset_script_event_counts,
-    save = save
+    save = save,
+    dispatch = dispatch
 })

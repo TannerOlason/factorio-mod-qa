@@ -22,6 +22,7 @@ type Config struct {
 	Timeout        time.Duration
 	Snapshot       string
 	ReportsDir     string
+	QAScenario     string
 
 	PositiveLoopWhitelist      []string
 	SuppressIssueCodes         []string
@@ -45,6 +46,7 @@ var configKeys = map[string]bool{
 	"timeout":                        true,
 	"snapshot":                       true,
 	"reports_dir":                    true,
+	"qa_scenario":                    true,
 	"positive_loop_whitelist":        true,
 	"suppress_issue_codes":           true,
 	"suppress_issue_matches":         true,
@@ -258,6 +260,7 @@ func configFromData(data map[string]any) (Config, error) {
 	cfg.RCONPassword = stringValue(data["rcon_password"])
 	cfg.Snapshot = stringValue(data["snapshot"])
 	cfg.ReportsDir = stringValue(data["reports_dir"])
+	cfg.QAScenario = stringValue(data["qa_scenario"])
 	cfg.MinReportSeverity = stringValue(data["min_report_severity"])
 	if cfg.MinReportSeverity != "" {
 		if _, ok := severityNameSet()[cfg.MinReportSeverity]; !ok {

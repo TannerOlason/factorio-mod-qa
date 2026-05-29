@@ -21,6 +21,7 @@ func TestLoadConfigLoadsStaticPolicy(t *testing.T) {
   "timeout": "45s",
   "snapshot": "prototype_snapshot.json",
   "reports_dir": ".fmqa/reports",
+  "qa_scenario": "script-event-growth",
   "positive_loop_whitelist": ["known-loop"],
   "suppress_issue_codes": ["item_without_use"],
   "suppress_issue_matches": [
@@ -53,7 +54,8 @@ func TestLoadConfigLoadsStaticPolicy(t *testing.T) {
 		cfg.RCONPassword != "secret" ||
 		cfg.Timeout != 45*time.Second ||
 		cfg.Snapshot != "prototype_snapshot.json" ||
-		cfg.ReportsDir != ".fmqa/reports" {
+		cfg.ReportsDir != ".fmqa/reports" ||
+		cfg.QAScenario != "script-event-growth" {
 		t.Fatalf("config did not load expected scalar values: %#v", cfg)
 	}
 	if !reflect.DeepEqual(cfg.PositiveLoopWhitelist, []string{"known-loop"}) {

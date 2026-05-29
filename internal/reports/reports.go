@@ -17,6 +17,15 @@ type Summary struct {
 	IssueCount   int               `json:"issue_count"`
 	Issues       []snapshot.Issue  `json:"issues"`
 	Artifacts    map[string]string `json:"artifacts,omitempty"`
+	Scenarios    []ScenarioSummary `json:"scenarios,omitempty"`
+}
+
+type ScenarioSummary struct {
+	Name       string `json:"name"`
+	IssueCount int    `json:"issue_count"`
+	TracePath  string `json:"trace_path,omitempty"`
+	Error      string `json:"error,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
 }
 
 func Write(dir string, summary Summary) error {
@@ -43,8 +52,23 @@ func markdown(summary Summary) string {
 		fmt.Fprintf(&b, "- Snapshot: `%s`\n", summary.SnapshotPath)
 	}
 	fmt.Fprintf(&b, "- Issues: %d\n\n", summary.IssueCount)
+	if len(summary.Scenarios) > 0 {
+		b.WriteString("## Scenarios\n\n")
+		for _, scenario := range summary.Scenarios {
+			fmt.Fprintf(&b, "### %s\n\n", scenario.Name)
+			fmt.Fprintf(&b, "- Issues: %d\n", scenario.IssueCount)
+			fmt.Fprintf(&b, "- Duration: `%dms`\n", scenario.DurationMS)
+			if scenario.TracePath != "" {
+				fmt.Fprintf(&b, "- Trace: `%s`\n", scenario.TracePath)
+			}
+			if scenario.Error != "" {
+				fmt.Fprintf(&b, "- Error: `%s`\n", scenario.Error)
+			}
+			b.WriteString("\n")
+		}
+	}
 	if len(summary.Issues) == 0 {
-		b.WriteString("No static validation issues were found.\n")
+		b.WriteString("No reportable issues were found.\n")
 		return b.String()
 	}
 	b.WriteString("## Issues\n\n")

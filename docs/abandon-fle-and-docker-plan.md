@@ -7,9 +7,8 @@ Factorio headless process directly, manages it as a normal subprocess, and talks
 to it over RCON. No image builds, no Compose files, no Docker socket, and no
 container maintenance are required in v0.
 
-Create a Go-first project named `factorio-mod-qa`. Keep useful QA logic from the
-FLE fork as temporary Python legacy code under `legacy_py/`, then port it to Go
-module-by-module.
+Create a Go project named `factorio-mod-qa`. Useful QA logic from the old FLE
+fork has been ported into Go or discarded; no Python implementation remains.
 
 ## New Runtime Model
 
@@ -55,62 +54,19 @@ The CLI creates local working directories automatically:
   reports/
 ```
 
-## Files And Directories To Preserve As Legacy
+## Preserved Fixtures
 
-Copied into `legacy_py/mod_qa_agent/`:
-
-- `static_analyzer.py`
-- `mod_source.py`
-- `report_writer.py`
-- `bug_detector.py`
-- `fuzz_orchestrator.py`
-- `runner.py`
-- `snapshot_session.py`
-- `action_trace.py`
-- `trace_generator.py`
-- `trace_runner.py`
-- `state_observer.py`
-- `config/example.json`
-- `README.md`
-- `QA-BOT-CHANGES.md`
-
-Additional support modules copied because the selected files import them:
-
-- `action_mutator.py`
-- `novelty_archive.py`
-- `llm_planner.py`
-
-Copied into `legacy_py/prototypes/`:
-
-- `snapshot.py`
-- `recipe_graph.py`
-- `tech_graph.py`
-- `validators.py`
-- `__init__.py`
-
-Copied fixtures:
+Copied fixtures from the earlier prototype:
 
 - `fixtures/mods/qa-broken-mod/`
 - `fixtures/prototype_snapshots/qa_broken_mod.json`
-
-Copied/adapted tests:
-
-- `tests/mod_qa_agent/test_static_analyzer.py`
-- `tests/mod_qa_agent/test_mod_source.py`
-- `tests/mod_qa_agent/test_report_writer.py`
-- `tests/mod_qa_agent/test_runner_config.py`
-- `tests/mod_qa_agent/test_snapshot_session.py`
-- `tests/mod_qa_agent/test_trace_generator.py`
-- `tests/mod_qa_agent/test_trace_runner.py`
-- `tests/mod_qa_agent/test_state_observer.py`
-- `tests/mod_qa_agent/test_fixture_snapshots.py`
 
 Not copied into the new runtime:
 
 - `mod_qa_agent/factorio_session.py`
 - FLE `ClusterManager`
 - FLE `FactorioInstance`
-- FLE namespace Python eval
+- FLE namespace eval
 - FLE `GameState`
 - `mod_qa_agent/rcon_probe/`
 - Docker Compose files
@@ -129,7 +85,6 @@ factorio-mod-qa/
   qa_control_mod/
     info.json
     control.lua
-  legacy_py/
   fixtures/
   docs/
     abandon-fle-and-docker-plan.md
@@ -152,7 +107,7 @@ factorio-mod-qa/
 ## Assumptions
 
 - Go is the long-term primary language.
-- Python static/reporting code is temporary bootstrap material.
+- Go is the only implementation language.
 - User provides a local Factorio install path with the required DLC/mod setup.
 - Rootless Docker/Podman may be considered later only as optional CI
   infrastructure, not as the default developer workflow.

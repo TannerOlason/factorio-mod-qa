@@ -36,6 +36,8 @@ type StartOptions struct {
 	RunID          string
 	RCONPort       int
 	RCONPassword   string
+	SavePath       string
+	LogName        string
 	ExtraArgs      []string
 }
 
@@ -183,7 +185,9 @@ func Start(ctx context.Context, opts StartOptions) (*Process, error) {
 	if modsDir != "" {
 		args = append(args, "--mod-directory", modsDir)
 	}
-	if opts.Scenario != "" {
+	if opts.SavePath != "" {
+		args = append(args, "--start-server", opts.SavePath)
+	} else if opts.Scenario != "" {
 		args = append(args, "--start-server-load-scenario", scenarioName(opts.Scenario))
 	} else {
 		savePath := filepath.Join(dirs.Saves, "fmqa-autosave.zip")
@@ -195,7 +199,11 @@ func Start(ctx context.Context, opts StartOptions) (*Process, error) {
 	cmd := exec.CommandContext(runCtx, factorioBin, args...)
 	cmd.Dir = dirs.Root
 
-	logPath := filepath.Join(dirs.Run, "factorio.log")
+	logName := opts.LogName
+	if logName == "" {
+		logName = "factorio.log"
+	}
+	logPath := filepath.Join(dirs.Run, logName)
 	logFile, err := os.Create(logPath)
 	if err != nil {
 		cancel()

@@ -111,6 +111,13 @@ func TestScenarioNameMapsDefaultOpenWorld(t *testing.T) {
 	}
 }
 
+func TestStartOptionsExposeSavePathAndLogName(t *testing.T) {
+	opts := StartOptions{SavePath: "save.zip", LogName: "reload.log"}
+	if opts.SavePath != "save.zip" || opts.LogName != "reload.log" {
+		t.Fatalf("unexpected start options: %#v", opts)
+	}
+}
+
 func TestResolveFactorioBinAcceptsInstallDirectory(t *testing.T) {
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin", "x64", "factorio")

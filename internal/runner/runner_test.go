@@ -29,13 +29,13 @@ func TestLuaStringQuotesPayload(t *testing.T) {
 	}
 }
 
-func TestScriptStressEntities(t *testing.T) {
-	entities := scriptStressEntities("qa-ticking-machine", 5)
-	if len(entities) != 5 {
-		t.Fatalf("len = %d, wanted 5", len(entities))
+func TestRCONPortParsesAddress(t *testing.T) {
+	port, err := rconPort("127.0.0.1:27000")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if entities[4]["name"] != "qa-ticking-machine" {
-		t.Fatalf("unexpected entity name: %#v", entities[4])
+	if port != 27000 {
+		t.Fatalf("port = %d", port)
 	}
 }
 
