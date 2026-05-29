@@ -1,0 +1,8 @@
+{
+  "name": "qa-broken-mod",
+  "version": "0.1.0",
+  "title": "QA Broken Mod Fixture",
+  "author": "FLE QA",
+  "factorio_version": "2.0",
+  "description": "Intentionally broken fixture mod for mod QA tests."
+}

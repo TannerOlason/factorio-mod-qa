@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "factorio_version": "2.0.73",
+  "active_mods": {
+    "base": "2.0.73",
+    "qa-broken-mod": "0.1.0"
+  },
+  "items": {
+    "iron-ore": {
+      "name": "iron-ore",
+      "source_mod": "base"
+    },
+    "qa-unused-item": {
+      "name": "qa-unused-item",
+      "source_mod": "qa-broken-mod"
+    }
+  },
+  "fluids": {},
+  "resources": {
+    "iron-ore": {
+      "name": "iron-ore",
+      "source_mod": "base",
+      "mineable_properties": {
+        "products": [
+          {
+            "name": "iron-ore",
+            "type": "item",
+            "amount": 1
+          }
+        ]
+      }
+    }
+  },
+  "recipes": {
+    "qa-missing-machine-recipe": {
+      "name": "qa-missing-machine-recipe",
+      "category": "qa-missing-category",
+      "source_mod": "qa-broken-mod",
+      "ingredients": [
+        {
+          "name": "qa-missing-ingredient",
+          "type": "item",
+          "amount": 1
+        }
+      ],
+      "products": [
+        {
+          "name": "qa-unused-item",
+          "type": "item",
+          "amount": 1
+        }
+      ]
+    },
+    "qa-positive-loop": {
+      "name": "qa-positive-loop",
+      "category": "crafting",
+      "source_mod": "qa-broken-mod",
+      "ingredients": [
+        {
+          "name": "qa-unused-item",
+          "type": "item",
+          "amount": 1
+        }
+      ],
+      "products": [
+        {
+          "name": "qa-unused-item",
+          "type": "item",
+          "amount": 2
+        }
+      ]
+    }
+  },
+  "entities": {
+    "assembling-machine-1": {
+      "name": "assembling-machine-1",
+      "type": "assembling-machine",
+      "source_mod": "base",
+      "crafting_categories": [
+        "crafting"
+      ]
+    }
+  },
+  "technologies": {
+    "qa-bad-technology": {
+      "name": "qa-bad-technology",
+      "source_mod": "qa-broken-mod",
+      "prerequisites": [
+        "qa-missing-technology"
+      ],
+      "effects": [
+        {
+          "type": "unlock-recipe",
+          "recipe": "qa-missing-recipe"
+        }
+      ],
+      "research_unit_ingredients": [
+        {
+          "name": "qa-missing-science",
+          "amount": 1
+        }
+      ]
+    }
+  },
+  "modules": {},
+  "crafting_categories": {
+    "crafting": {
+      "name": "crafting",
+      "source_mod": "base"
+    }
+  },
+  "resource_categories": {},
+  "tiles": {},
+  "equipment": {},
+  "achievements": {},
+  "surfaces": {}
+}

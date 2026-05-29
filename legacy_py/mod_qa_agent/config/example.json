@@ -1,0 +1,50 @@
+{
+  "extends": [],
+  "goals": 20,
+  "native_saves": false,
+  "max_traces": 20,
+  "min_report_severity": "warning",
+  "mutations": 0,
+  "output_dir": ".fle/mod_qa",
+  "positive_loop_whitelist": [],
+  "scenario": "open_world",
+  "enabled_static_policy_profiles": ["quiet-debug-mod"],
+  "severity_override_matches": [],
+  "severity_overrides": {},
+  "snapshot": null,
+  "static_policy_profiles": {
+    "quiet-debug-mod": {
+      "suppress_issue_matches": [
+        {
+          "code": "recipe_missing_crafting_machine",
+          "prototype": "known-debug-recipe",
+          "mod": "known-debug-mod"
+        }
+      ]
+    }
+  },
+  "suppress_issue_codes": [],
+  "suppress_issue_matches": [
+    {
+      "all": [
+        {
+          "code": "recipe_missing_crafting_machine"
+        },
+        {
+          "prototype": "known-debug-recipe"
+        },
+        {
+          "mod": "known-debug-mod"
+        },
+        {
+          "not": {
+            "details": {
+              "category": "allowed-debug"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "validate_only": false
+}

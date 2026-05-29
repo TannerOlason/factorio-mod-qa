@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+testpaths = ["legacy_py/tests"]
+pythonpath = ["legacy_py"]
+markers = [
+  "no_factorio: tests that do not require a local Factorio process",
+]
