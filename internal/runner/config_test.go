@@ -22,6 +22,10 @@ func TestLoadConfigLoadsStaticPolicy(t *testing.T) {
   "snapshot": "prototype_snapshot.json",
   "reports_dir": ".fmqa/reports",
   "qa_scenario": "script-event-growth",
+  "blueprint": "blueprints/fixture.txt",
+  "blueprint_copies": 25,
+  "blueprint_spacing": 16,
+  "blueprint_ticks": 300,
   "positive_loop_whitelist": ["known-loop"],
   "suppress_issue_codes": ["item_without_use"],
   "suppress_issue_matches": [
@@ -55,7 +59,11 @@ func TestLoadConfigLoadsStaticPolicy(t *testing.T) {
 		cfg.Timeout != 45*time.Second ||
 		cfg.Snapshot != "prototype_snapshot.json" ||
 		cfg.ReportsDir != ".fmqa/reports" ||
-		cfg.QAScenario != "script-event-growth" {
+		cfg.QAScenario != "script-event-growth" ||
+		cfg.BlueprintPath != "blueprints/fixture.txt" ||
+		cfg.BlueprintCopies != 25 ||
+		cfg.BlueprintSpacing != 16 ||
+		cfg.BlueprintTicks != 300 {
 		t.Fatalf("config did not load expected scalar values: %#v", cfg)
 	}
 	if !reflect.DeepEqual(cfg.PositiveLoopWhitelist, []string{"known-loop"}) {

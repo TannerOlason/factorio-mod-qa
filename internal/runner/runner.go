@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"factorio-mod-qa/internal/blueprint"
 	"factorio-mod-qa/internal/factorio"
 	"factorio-mod-qa/internal/qa"
 	"factorio-mod-qa/internal/rcon"
@@ -27,17 +28,21 @@ const (
 )
 
 type RunOptions struct {
-	FactorioBin    string
-	WriteDir       string
-	ModsPath       string
-	ControlModPath string
-	Scenario       string
-	RunID          string
-	RCONPort       int
-	RCONPassword   string
-	Timeout        time.Duration
-	Policy         snapshot.Policy
-	QAScenario     string
+	FactorioBin      string
+	WriteDir         string
+	ModsPath         string
+	ControlModPath   string
+	Scenario         string
+	RunID            string
+	RCONPort         int
+	RCONPassword     string
+	Timeout          time.Duration
+	Policy           snapshot.Policy
+	QAScenario       string
+	BlueprintPath    string
+	BlueprintCopies  int
+	BlueprintSpacing int
+	BlueprintTicks   int
 }
 
 type DoctorOptions struct {
@@ -80,6 +85,14 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if opts.RCONPassword == "" {
 		opts.RCONPassword = DefaultPassword
 	}
+	var blueprintDoc *blueprint.Document
+	if opts.BlueprintPath != "" {
+		var err error
+		blueprintDoc, err = blueprint.DecodeInput(opts.BlueprintPath)
+		if err != nil {
+			return err
+		}
+	}
 	proc, err := factorio.Start(ctx, factorio.StartOptions{
 		FactorioBin:    opts.FactorioBin,
 		WriteDir:       opts.WriteDir,
@@ -121,6 +134,21 @@ func Run(ctx context.Context, opts RunOptions) error {
 	snapshotPath := filepath.Join(proc.Dirs.Run, "prototype_snapshot.json")
 	if err := snapshot.Write(snapshotPath, snap); err != nil {
 		return err
+	}
+	artifacts := map[string]string{
+		"factorio_log":       initialLogPath,
+		"prototype_snapshot": snapshotPath,
+	}
+	if blueprintDoc != nil {
+		blueprintPath := filepath.Join(proc.Dirs.Run, "blueprint_input.json")
+		data, err := json.MarshalIndent(blueprintDoc.Raw, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(blueprintPath, append(data, '\n'), 0o644); err != nil {
+			return err
+		}
+		artifacts["blueprint_input"] = blueprintPath
 	}
 
 	analysis, err := snapshot.Analyze(snap, opts.Policy)
@@ -181,17 +209,17 @@ func Run(ctx context.Context, opts RunOptions) error {
 		session.Artifacts["factorio_log_reload_"+sanitizeArtifactKey(saveName)] = restartProc.LogPath
 		return nil
 	}
-	scenarios, err := qa.SelectScenarios(opts.QAScenario, snap)
+	scenarios, err := qa.SelectScenarios(opts.QAScenario, snap, blueprintDoc, qa.BlueprintOptions{
+		Copies:     opts.BlueprintCopies,
+		Spacing:    opts.BlueprintSpacing,
+		TickWindow: opts.BlueprintTicks,
+	})
 	if err != nil {
 		return err
 	}
 	scenarioRuns, err := qa.Runner{Scenarios: scenarios, TraceDir: proc.Dirs.Run}.Run(ctx, session)
 	if err != nil {
 		return err
-	}
-	artifacts := map[string]string{
-		"factorio_log":       initialLogPath,
-		"prototype_snapshot": snapshotPath,
 	}
 	for key, value := range session.Artifacts {
 		artifacts[key] = value

@@ -371,6 +371,44 @@ local function snapshot_state(payload)
     }
 end
 
+local function create_surface(payload)
+    local name = payload.name
+    if not name or name == "" then error("surface name is required") end
+    local existing = game.surfaces[name]
+    if existing then
+        return {name = existing.name, index = existing.index, created = false}
+    end
+    local surface = game.create_surface(name, payload.map_gen_settings or {})
+    surface.request_to_generate_chunks(payload.position or {0, 0}, payload.chunk_radius or 2)
+    surface.force_generate_chunk_requests()
+    return {name = surface.name, index = surface.index, created = true}
+end
+
+local function delete_surface(payload)
+    local name = payload.name
+    if not name or name == "" then error("surface name is required") end
+    if name == "nauvis" then error("refusing to delete nauvis") end
+    local surface = game.surfaces[name]
+    if not surface then return {deleted = false, name = name} end
+    game.delete_surface(surface)
+    return {deleted = true, name = name}
+end
+
+local function find_buildable_position(payload)
+    local surface = game.surfaces[payload.surface or "nauvis"]
+    if not surface then error("unknown surface: " .. tostring(payload.surface)) end
+    local entity = payload.entity or "steel-chest"
+    local position = payload.position or {0, 0}
+    local radius = payload.radius or 64
+    local precision = payload.precision or 1
+    local found = surface.find_non_colliding_position(entity, position, radius, precision)
+    return {
+        surface = surface.name,
+        entity = entity,
+        position = found
+    }
+end
+
 local function place_entity(payload)
     ensure_storage()
     local surface = game.surfaces[payload.surface or "nauvis"]
@@ -434,6 +472,214 @@ local function remove_entity(payload)
     entity.destroy({raise_destroy = false})
     if unit then storage.fmqa_entities[unit] = nil end
     return {removed = true, unit_number = unit}
+end
+
+local blueprint_config_fields = {
+    "ammo_inventory",
+    "bar",
+    "connections",
+    "control_behavior",
+    "filters",
+    "infinity_settings",
+    "inventory",
+    "items",
+    "parameters",
+    "recipe",
+    "request_filters",
+    "station",
+    "tags",
+    "trunk_inventory"
+}
+
+local function first_blueprint(payload)
+    local root = payload.blueprint or payload
+    if root.blueprint then return root.blueprint end
+    local book = root.blueprint_book
+    if book and book.blueprints then
+        for _, entry in pairs(book.blueprints) do
+            if entry.blueprint then return entry.blueprint end
+        end
+    end
+    error("blueprint payload must contain blueprint or blueprint_book")
+end
+
+local function xy(position)
+    position = position or {}
+    return {
+        x = position.x or position[1] or 0,
+        y = position.y or position[2] or 0
+    }
+end
+
+local function offset_position(base, relative)
+    base = xy(base)
+    relative = xy(relative)
+    return {x = base.x + relative.x, y = base.y + relative.y}
+end
+
+local function recipe_name(entity)
+    if not (entity and entity.valid and entity.get_recipe) then return nil end
+    local ok, recipe = pcall(function() return entity.get_recipe() end)
+    if not ok or not recipe then return nil end
+    return proto_name(recipe)
+end
+
+local function module_inventory(entity)
+    if not (entity and entity.valid and entity.get_module_inventory) then return nil end
+    local ok, inventory = pcall(function() return entity.get_module_inventory() end)
+    if ok and inventory and inventory.valid then return inventory end
+    return nil
+end
+
+local function tracked_entity_snapshot(entity, blueprint_recipe)
+    if not (entity and entity.valid) then return nil end
+    local module_inv = module_inventory(entity)
+    local inventory = first_entity_inventory(entity)
+    return {
+        name = entity.name,
+        unit_number = entity.unit_number,
+        position = entity.position,
+        blueprint_recipe = blueprint_recipe,
+        actual_recipe = recipe_name(entity),
+        recipe_locked = safe_get(entity, "recipe_locked"),
+        inventory = inventory_counts(inventory),
+        module_inventory = inventory_counts(module_inv)
+    }
+end
+
+local function configured_fields(spec)
+    local fields = {}
+    for _, field in pairs(blueprint_config_fields) do
+        if spec[field] ~= nil then fields[#fields + 1] = field end
+    end
+    table.sort(fields)
+    return fields
+end
+
+local function nil_if_empty(list)
+    if list and #list > 0 then return list end
+    return nil
+end
+
+local function insert_blueprint_items(entity, items)
+    if not items then return {} end
+    local inserted = {}
+    local module_inv = module_inventory(entity)
+    local inventory = first_entity_inventory(entity)
+    for name, count in pairs(items) do
+        local remaining = count
+        if module_inv then
+            local n = module_inv.insert({name = name, count = remaining})
+            inserted[name] = (inserted[name] or 0) + n
+            remaining = remaining - n
+        end
+        if remaining > 0 and inventory then
+            local n = inventory.insert({name = name, count = remaining})
+            inserted[name] = (inserted[name] or 0) + n
+        end
+    end
+    return inserted
+end
+
+local function apply_blueprint_entity_config(entity, spec)
+    local applied = {}
+    if spec.recipe and entity and entity.valid and entity.set_recipe then
+        local ok, err = pcall(function() entity.set_recipe(spec.recipe) end)
+        applied.recipe = {ok = ok, error = ok and nil or tostring(err)}
+    end
+    if spec.items and entity and entity.valid then
+        applied.items = insert_blueprint_items(entity, spec.items)
+    end
+    return applied
+end
+
+local function create_blueprint_entity(surface, spec, payload, mode)
+    local position = offset_position(payload.position, spec.position)
+    local force = payload.force or "player"
+    if mode == "ghost" then
+        return surface.create_entity({
+            name = "entity-ghost",
+            inner_name = spec.name,
+            position = position,
+            force = force,
+            direction = spec.direction,
+            expires = false
+        })
+    end
+    return surface.create_entity({
+        name = spec.name,
+        position = position,
+        force = force,
+        direction = spec.direction,
+        raise_built = payload.raise_built ~= false,
+        create_build_effect_smoke = false
+    })
+end
+
+local function blueprint_smoke(payload)
+    ensure_storage()
+    local surface = game.surfaces[payload.surface or "nauvis"]
+    if not surface then error("unknown surface: " .. tostring(payload.surface)) end
+    local mode = payload.mode or "instant"
+    if mode ~= "ghost" and mode ~= "instant" then error("unknown blueprint smoke mode: " .. tostring(mode)) end
+    local blueprint = first_blueprint(payload)
+    local created = {}
+    local missing = {}
+    local configured = {}
+    local entities = blueprint.entities or {}
+
+    for _, spec in pairs(entities) do
+        local fields = configured_fields(spec)
+        if #fields > 0 then
+            configured[#configured + 1] = {
+                entity_number = spec.entity_number,
+                name = spec.name,
+                fields = fields,
+                recipe = spec.recipe
+            }
+        end
+
+        if not spec.name then
+            missing[#missing + 1] = {name = "<missing>", reason = "entity name is missing"}
+        else
+            local ok, entity_or_error = pcall(function()
+                return create_blueprint_entity(surface, spec, payload, mode)
+            end)
+            local entity = ok and entity_or_error or nil
+            if not (entity and entity.valid) then
+                missing[#missing + 1] = {name = spec.name, reason = ok and "create_entity returned nil" or tostring(entity_or_error)}
+            else
+                if mode == "instant" then
+                    apply_blueprint_entity_config(entity, spec)
+                end
+                if entity.unit_number then
+                    storage.fmqa_entities[entity.unit_number] = entity
+                end
+                created[#created + 1] = tracked_entity_snapshot(entity, spec.recipe)
+            end
+        end
+    end
+
+    return {
+        mode = mode,
+        surface = surface.name,
+        expected_entities = #entities,
+        created_count = #created,
+        created = nil_if_empty(created),
+        missing = nil_if_empty(missing),
+        configured = nil_if_empty(configured)
+    }
+end
+
+local function read_tracked_entities(payload)
+    local entities = {}
+    for _, unit_number in pairs(payload.unit_numbers or {}) do
+        local entity = find_tracked_entity(unit_number)
+        if entity then
+            entities[#entities + 1] = tracked_entity_snapshot(entity, nil)
+        end
+    end
+    return {entities = nil_if_empty(entities)}
 end
 
 local function place_entities_batch(json_payload)
@@ -511,6 +757,15 @@ local function dispatch(command, json_payload)
         snapshot_state = function(payload)
             return snapshot_state(payload or {})
         end,
+        create_surface = function(payload)
+            return create_surface(payload or {})
+        end,
+        delete_surface = function(payload)
+            return delete_surface(payload or {})
+        end,
+        find_buildable_position = function(payload)
+            return find_buildable_position(payload or {})
+        end,
         place_entity = function(payload)
             return place_entity(payload or {})
         end,
@@ -528,6 +783,12 @@ local function dispatch(command, json_payload)
         end,
         remove_entity = function(payload)
             return remove_entity(payload or {})
+        end,
+        blueprint_smoke = function(payload)
+            return blueprint_smoke(payload or {})
+        end,
+        read_tracked_entities = function(payload)
+            return read_tracked_entities(payload or {})
         end,
         advance_ticks = function(payload)
             return decode_json(advance_ticks(payload and payload.ticks or 0))

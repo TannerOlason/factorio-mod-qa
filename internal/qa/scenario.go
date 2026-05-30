@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"factorio-mod-qa/internal/blueprint"
 	"factorio-mod-qa/internal/snapshot"
 )
 
@@ -121,13 +122,18 @@ func (r Runner) runOne(ctx context.Context, session *Session, scenario Scenario)
 	return run, nil
 }
 
-func SelectScenarios(selector string, snap *snapshot.Snapshot) ([]Scenario, error) {
+func SelectScenarios(selector string, snap *snapshot.Snapshot, blueprintDoc *blueprint.Document, blueprintOptions BlueprintOptions) ([]Scenario, error) {
 	if selector == "" || selector == "all" {
-		return []Scenario{
+		scenarios := []Scenario{
 			NewScriptEventGrowthScenario(),
 			NewInventoryAbuseScenario(),
 			NewSaveLoadAbuseScenario(),
-		}, nil
+			NewSurfaceSpawnScenario(),
+		}
+		if blueprintDoc != nil {
+			scenarios = append(scenarios, NewBlueprintSmokeScenario(blueprintDoc, blueprintOptions))
+		}
+		return scenarios, nil
 	}
 	if selector == "script-event-growth" {
 		return []Scenario{NewScriptEventGrowthScenario()}, nil
@@ -137,6 +143,15 @@ func SelectScenarios(selector string, snap *snapshot.Snapshot) ([]Scenario, erro
 	}
 	if selector == "save-load-abuse" {
 		return []Scenario{NewSaveLoadAbuseScenario()}, nil
+	}
+	if selector == "surface-spawn" {
+		return []Scenario{NewSurfaceSpawnScenario()}, nil
+	}
+	if selector == "blueprint-smoke" {
+		if blueprintDoc == nil {
+			return nil, fmt.Errorf("blueprint-smoke requires --blueprint")
+		}
+		return []Scenario{NewBlueprintSmokeScenario(blueprintDoc, blueprintOptions)}, nil
 	}
 	return nil, fmt.Errorf("unknown QA scenario %q", selector)
 }

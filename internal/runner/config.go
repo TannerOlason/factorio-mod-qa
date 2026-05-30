@@ -11,18 +11,22 @@ import (
 )
 
 type Config struct {
-	FactorioBin    string
-	WriteDir       string
-	ModsPath       string
-	ControlModPath string
-	Scenario       string
-	RunID          string
-	RCONPort       int
-	RCONPassword   string
-	Timeout        time.Duration
-	Snapshot       string
-	ReportsDir     string
-	QAScenario     string
+	FactorioBin      string
+	WriteDir         string
+	ModsPath         string
+	ControlModPath   string
+	Scenario         string
+	RunID            string
+	RCONPort         int
+	RCONPassword     string
+	Timeout          time.Duration
+	Snapshot         string
+	ReportsDir       string
+	QAScenario       string
+	BlueprintPath    string
+	BlueprintCopies  int
+	BlueprintSpacing int
+	BlueprintTicks   int
 
 	PositiveLoopWhitelist      []string
 	SuppressIssueCodes         []string
@@ -47,6 +51,10 @@ var configKeys = map[string]bool{
 	"snapshot":                       true,
 	"reports_dir":                    true,
 	"qa_scenario":                    true,
+	"blueprint":                      true,
+	"blueprint_copies":               true,
+	"blueprint_spacing":              true,
+	"blueprint_ticks":                true,
 	"positive_loop_whitelist":        true,
 	"suppress_issue_codes":           true,
 	"suppress_issue_matches":         true,
@@ -261,6 +269,7 @@ func configFromData(data map[string]any) (Config, error) {
 	cfg.Snapshot = stringValue(data["snapshot"])
 	cfg.ReportsDir = stringValue(data["reports_dir"])
 	cfg.QAScenario = stringValue(data["qa_scenario"])
+	cfg.BlueprintPath = stringValue(data["blueprint"])
 	cfg.MinReportSeverity = stringValue(data["min_report_severity"])
 	if cfg.MinReportSeverity != "" {
 		if _, ok := severityNameSet()[cfg.MinReportSeverity]; !ok {
@@ -268,6 +277,18 @@ func configFromData(data map[string]any) (Config, error) {
 		}
 	}
 	cfg.RCONPort, err = intValue(data["rcon_port"], "rcon_port")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.BlueprintCopies, err = intValue(data["blueprint_copies"], "blueprint_copies")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.BlueprintSpacing, err = intValue(data["blueprint_spacing"], "blueprint_spacing")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.BlueprintTicks, err = intValue(data["blueprint_ticks"], "blueprint_ticks")
 	if err != nil {
 		return Config{}, err
 	}

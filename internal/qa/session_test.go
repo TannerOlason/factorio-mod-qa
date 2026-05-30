@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"factorio-mod-qa/internal/blueprint"
 	"factorio-mod-qa/internal/snapshot"
 )
 
@@ -148,7 +149,7 @@ func TestScriptStressEntities(t *testing.T) {
 }
 
 func TestSelectScenariosIncludesInventoryAbuse(t *testing.T) {
-	scenarios, err := SelectScenarios("all", nil)
+	scenarios, err := SelectScenarios("all", nil, nil, BlueprintOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,11 +157,11 @@ func TestSelectScenariosIncludesInventoryAbuse(t *testing.T) {
 	for _, scenario := range scenarios {
 		names = append(names, scenario.Name())
 	}
-	if strings.Join(names, ",") != "script-event-growth,inventory-abuse,save-load-abuse" {
+	if strings.Join(names, ",") != "script-event-growth,inventory-abuse,save-load-abuse,surface-spawn" {
 		t.Fatalf("scenario names = %#v", names)
 	}
 
-	scenarios, err = SelectScenarios("inventory-abuse", nil)
+	scenarios, err = SelectScenarios("inventory-abuse", nil, nil, BlueprintOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,12 +169,59 @@ func TestSelectScenariosIncludesInventoryAbuse(t *testing.T) {
 		t.Fatalf("inventory-abuse selector = %#v", scenarios)
 	}
 
-	scenarios, err = SelectScenarios("save-load-abuse", nil)
+	scenarios, err = SelectScenarios("save-load-abuse", nil, nil, BlueprintOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(scenarios) != 1 || scenarios[0].Name() != "save-load-abuse" {
 		t.Fatalf("save-load-abuse selector = %#v", scenarios)
+	}
+
+	scenarios, err = SelectScenarios("surface-spawn", nil, nil, BlueprintOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scenarios) != 1 || scenarios[0].Name() != "surface-spawn" {
+		t.Fatalf("surface-spawn selector = %#v", scenarios)
+	}
+}
+
+func TestSelectScenariosIncludesBlueprintWhenConfigured(t *testing.T) {
+	doc := &blueprint.Document{Kind: "blueprint", Raw: map[string]any{"blueprint": map[string]any{}}}
+	scenarios, err := SelectScenarios("all", nil, doc, BlueprintOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(scenarios))
+	for _, scenario := range scenarios {
+		names = append(names, scenario.Name())
+	}
+	if strings.Join(names, ",") != "script-event-growth,inventory-abuse,save-load-abuse,surface-spawn,blueprint-smoke" {
+		t.Fatalf("scenario names = %#v", names)
+	}
+
+	scenarios, err = SelectScenarios("blueprint-smoke", nil, doc, BlueprintOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scenarios) != 1 || scenarios[0].Name() != "blueprint-smoke" {
+		t.Fatalf("blueprint-smoke selector = %#v", scenarios)
+	}
+	if _, err := SelectScenarios("blueprint-smoke", nil, nil, BlueprintOptions{}); err == nil {
+		t.Fatal("expected blueprint-smoke without document to fail")
+	}
+}
+
+func TestBlueprintSmokeOptionsDefaultAndPositions(t *testing.T) {
+	scenario := NewBlueprintSmokeScenario(&blueprint.Document{}, BlueprintOptions{})
+	if scenario.Options.Copies != 1 || scenario.Options.Spacing != 12 || scenario.Options.TickWindow != 120 {
+		t.Fatalf("options = %#v", scenario.Options)
+	}
+	if got := copyPosition(21, 10); got[0] != 74 || got[1] != 10 {
+		t.Fatalf("copy position = %#v", got)
+	}
+	if got := chunkRadiusForCopies(50, 12); got < 4 {
+		t.Fatalf("chunk radius = %d", got)
 	}
 }
 

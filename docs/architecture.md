@@ -24,7 +24,7 @@ local Factorio plus RCON.
 `qa_control_mod`, runs static validation, runs selected short QA scenarios,
 writes reports and scenario traces, and requests a native Factorio save.
 Built-in QA scenarios currently include `script-event-growth`, `inventory-abuse`,
-and `save-load-abuse`.
+`save-load-abuse`, `surface-spawn`, and `blueprint-smoke`.
 
 Before startup, `fmqa run` stages a single Factorio mods directory at
 `.fmqa/factorio/mods` by symlinking entries from `--mods-path` and the bundled
@@ -45,6 +45,25 @@ Runtime probes depend on ticks advancing even when no player is connected.
 
 `fmqa validate` validates an existing snapshot without starting Factorio.
 
+`fmqa blueprint-test` decodes a Factorio blueprint exchange string or a file
+containing an exchange string/raw blueprint JSON and prints a structured summary.
+The summary preserves raw JSON and highlights parametrisation/configuration
+fields such as recipes, control behavior, item requests, and inventory settings.
+
+`fmqa run --qa-scenario blueprint-smoke --blueprint ...` sends the decoded JSON
+to `qa_control_mod`, places ghosts, instant-builds real entities with build
+events raised, waits for tick-driven mod reconciliation, and reports placement
+failures or blueprint-configured recipes that remain applied. This is intended
+to catch mod-agnostic versions of player escape paths where a blueprint carries
+recipe, signal, module, equipment, or inventory state into a script-controlled
+machine. `--blueprint-copies`, `--blueprint-spacing`, and `--blueprint-ticks`
+scale the same scenario into a repeat placement/tick-load probe.
+
+`fmqa inspect-mod` scans an unpacked mod's Lua source for on-tick handlers, tick
+fanout calls, interval constants, storage-backed loops inside tick contexts, and
+rough mega-base loop pressure estimates. This is source-level guidance for which
+runtime scenarios to build; it does not replace live Factorio timing.
+
 `fmqa run` and `fmqa validate` both accept JSON policy config through
 `--config`. Static policy handling is implemented in Go and supports extended
 configs, reusable static policy profiles, suppressions, severity overrides, and
@@ -62,10 +81,15 @@ The bundled mod exposes these remote calls:
 - `place_entities_batch`
 - `place_entity`
 - `snapshot_state`
+- `create_surface`
+- `delete_surface`
+- `find_buildable_position`
 - `insert_items`
 - `read_entity_inventory`
 - `mine_entity_to_inventory`
 - `remove_entity`
+- `blueprint_smoke`
+- `read_tracked_entities`
 - `advance_ticks`
 - `script_event_counts`
 - `reset_script_event_counts`
